@@ -1,23 +1,25 @@
-import { useState, useEffect } from "react";
+import TabInterface from './components/TabInterface'
 
 function App() {
-  const [status, setStatus] = useState("...");
-
-  useEffect(() => {
-    fetch("/api/health")
-      .then((res) => res.json())
-      .then((data) => setStatus(data.status))
-      .catch(() => setStatus("error"));
-  }, []);
-
   return (
-    <div className="flex h-screen items-center justify-center bg-slate-900 text-white">
-      <div className="p-8 rounded-xl bg-slate-800 shadow-md">
-        <h1 className="text-2xl font-bold mb-2">LAMARL Playground</h1>
-        <p>Backend status: {status}</p>
+    <div className="min-h-screen bg-background text-foreground">
+      {/* Header */}
+      <header className="border-b border-border px-6 py-2">
+        <h1 className="text-2xl font-bold">
+          LAMARL Playground
+        </h1>
+        <p className="text-xs text-muted-foreground">
+          LLM-Aided Multi-Agent Reinforcement Learning Visualization
+        </p>
+      </header>
+
+      {/* Main Content - Tab Interface */}
+      <div className="h-[calc(100vh-60px)]">
+        <TabInterface />
       </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
+
