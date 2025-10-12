@@ -10,10 +10,13 @@ import PerformanceMetrics from './PerformanceMetrics'
 import SampleEfficiency from './SampleEfficiency'
 import RobotVisualization from './RobotVisualization'
 import MetricsChart from './MetricsChart'
+import EpisodeMetricsChart from './EpisodeMetricsChart'
+import EpisodeComparison from './EpisodeComparison'
 import LossChart from './LossChart'
 import ActionBlending from './ActionBlending'
 import ReplayBufferStatus from './ReplayBufferStatus'
 import LLMGeneratedFunctions from './LLMGeneratedFunctions'
+import { useMARLStore } from '@/store/useMARLStore'
 
 const methods = [
   { name: 'LAMARL (Ours)', value: 95, color: 'bg-blue-500' },
@@ -23,59 +26,72 @@ const methods = [
 ]
 
 export default function MARLModuleRefactored() {
-  const [isTraining, setIsTraining] = useState(false)
-  const [episode, setEpisode] = useState(0)
-  const [step, setStep] = useState(0)
+  // Zustand store
+  const {
+    episodeId,
+    episodeConfig,
+    isTraining,
+    currentEpisode,
+    currentStep,
+    totalEpisodes,
+    totalSteps,
+    robots,
+    trajectories,
+    coverage,
+    uniformity,
+    coverageHistory,
+    uniformityHistory,
+    episodeHistory,
+    lossActorHistory,
+    lossCriticHistory,
+    converged,
+    error,
+    createNewEpisode,
+    startTraining,
+    stopTraining,
+    resetTraining,
+  } = useMARLStore()
+
+  // Local UI state
   const [usePriorPolicy, setUsePriorPolicy] = useState(true)
   const [useLLMReward, setUseLLMReward] = useState(true)
   const [beta, setBeta] = useState(0.3)
-  
-  // Generate sample data that evolves over time
-  const generateCoverageData = (episodes: number) => {
-    return Array.from({ length: episodes }, (_, i) => 
-      Math.min(0.95, 0.2 + (i / episodes) * 0.7 + Math.random() * 0.05)
-    )
-  }
-  
-  const generateUniformityData = (episodes: number) => {
-    return Array.from({ length: episodes }, (_, i) => 
-      Math.max(0.05, 0.5 - (i / episodes) * 0.4 + Math.random() * 0.05)
-    )
-  }
 
-  const coverageData = generateCoverageData(50)
-  const uniformityData = generateUniformityData(50)
-  
-  // Actor loss components
-  const actorQValues = Array.from({ length: 30 }, (_, i) => 80 - i * 1.5 + Math.random() * 5)
-  const actorPriorLoss = Array.from({ length: 30 }, (_, i) => 30 - i * 0.8 + Math.random() * 3)
-  
-  // Critic loss
-  const criticTdError = Array.from({ length: 30 }, (_, i) => 100 - i * 2.5 + Math.random() * 5)
-  
-  const currentCoverage = coverageData[coverageData.length - 1]
-  const currentUniformity = uniformityData[uniformityData.length - 1]
-  const converged = currentCoverage >= 0.8 && currentUniformity <= 0.2
-
-  // Simulate training progress
+  // エピソード作成（初回マウント時のみ）
   useEffect(() => {
-    if (isTraining) {
-      const interval = setInterval(() => {
-        setStep((prev) => {
-          if (prev >= 199) {
-            setEpisode((e) => e + 1)
-            return 0
-          }
-          return prev + 1
-        })
-      }, 100)
-      return () => clearInterval(interval)
+    if (!episodeId) {
+      console.log('🔄 Creating new episode...')
+      createNewEpisode()
     }
-  }, [isTraining])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleEditEnvironment = () => {
     // Navigate to LLM tab to edit environment
     console.log('Navigate to LLM tab')
+  }
+
+  const handleToggleTraining = async () => {
+    if (isTraining) {
+      await stopTraining()
+    } else {
+      // エピソードがまだ作成されていない場合は作成
+      if (!episodeId) {
+        console.log('⚠️ No episode ID, creating one first...')
+        await createNewEpisode()
+        // 少し待ってからエピソードIDを再取得
+        const newEpisodeId = useMARLStore.getState().episodeId
+        if (!newEpisodeId) {
+          console.error('❌ Failed to create episode')
+          return
+        }
+      }
+      await startTraining(100, 200)  // 100エピソード、各200ステップ（3000は長すぎる）
+    }
+  }
+
+  const handleReset = async () => {
+    await resetTraining()
   }
 
   return (
@@ -83,31 +99,54 @@ export default function MARLModuleRefactored() {
       {/* Left Panel - Training Controls */}
       <div className="w-[360px] border-r border-border overflow-y-auto">
         <div className="p-6 space-y-4">
+          {/* Status Messages */}
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+              ❌ {error}
+            </div>
+          )}
+          {!episodeId && !error && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+              🔄 Creating episode...
+            </div>
+          )}
+          {episodeId && !isTraining && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+              ✅ Ready to train (ID: {episodeId.slice(-8)})
+            </div>
+          )}
+          {isTraining && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+              🔄 Training in progress
+              <div className="text-xs mt-1">
+                Episodes completed: {episodeHistory.length} / {totalEpisodes}
+              </div>
+            </div>
+          )}
+
           {/* Environment Display (read-only) */}
           <EnvironmentDisplay
-            shape="circle"
-            nRobots={30}
-            rSense={0.4}
-            rAvoid={0.1}
-            nHn={6}
-            nHc={80}
+            shape={episodeConfig.shape || 'circle'}
+            nRobots={episodeConfig.n_robot || 30}
+            rSense={episodeConfig.r_sense || 0.4}
+            rAvoid={episodeConfig.r_avoid || 0.1}
+            nHn={episodeConfig.nhn || 6}
+            nHc={episodeConfig.nhc || 80}
             onEdit={handleEditEnvironment}
           />
 
           {/* Training Controls (always visible) */}
           <TrainingControls
             isTraining={isTraining}
-            episode={episode}
-            maxEpisodes={3000}
-            step={step}
-            maxSteps={200}
+            episode={currentEpisode}
+            maxEpisodes={totalEpisodes}
+            step={currentStep}
+            maxSteps={totalSteps}
             converged={converged}
-            onToggleTraining={() => setIsTraining(!isTraining)}
-            onReset={() => {
-              setEpisode(0)
-              setStep(0)
-            }}
-            onStepForward={() => setStep((prev) => Math.min(prev + 1, 200))}
+            disabled={!episodeId}
+            onToggleTraining={handleToggleTraining}
+            onReset={handleReset}
+            onStepForward={() => {}}  // TODO: step forward implementation
           />
 
           {/* Accordion for other settings */}
@@ -152,24 +191,28 @@ export default function MARLModuleRefactored() {
       <div className="flex-1 p-6 space-y-6 overflow-y-auto">
         {/* Robot Visualization (Full Width) */}
         <RobotVisualization
-          shape="circle"
-          rSense={0.4}
-          rAvoid={0.1}
+          shape={episodeConfig.shape || 'circle'}
+          robots={robots}
+          trajectories={trajectories}
+          rSense={episodeConfig.r_sense || 0.4}
+          rAvoid={episodeConfig.r_avoid || 0.1}
+          gridSize={episodeConfig.grid_size || 64}
+          showTrajectories={true}
         />
 
         {/* Performance Metrics with Convergence Status */}
         <PerformanceMetrics
-          coverage={currentCoverage}
-          uniformity={currentUniformity}
+          coverage={coverage}
+          uniformity={uniformity}
           coverageTarget={0.8}
           uniformityTarget={0.2}
         />
 
-        {/* 2-Column Grid: M1 and M2 Time-series Charts */}
+        {/* 2-Column Grid: M1 and M2 Time-series Charts (Step-wise) */}
         <div className="grid grid-cols-2 gap-6">
           <MetricsChart
-            title="Coverage Rate (M₁)"
-            data={coverageData}
+            title="Coverage Rate (M₁) - Real-time"
+            data={coverageHistory.length > 0 ? coverageHistory : [0]}
             color="#3b82f6"
             targetValue={0.8}
             targetLabel="Target ≥ 0.8"
@@ -178,8 +221,8 @@ export default function MARLModuleRefactored() {
             goodDirection="up"
           />
           <MetricsChart
-            title="Uniformity (M₂)"
-            data={uniformityData}
+            title="Uniformity (M₂) - Real-time"
+            data={uniformityHistory.length > 0 ? uniformityHistory : [0]}
             color="#8b5cf6"
             targetValue={0.2}
             targetLabel="Target ≤ 0.2"
@@ -189,19 +232,54 @@ export default function MARLModuleRefactored() {
           />
         </div>
 
+        {/* Episode-wise Metrics (論文に基づく) */}
+        {episodeHistory.length > 0 && (
+          <div className="grid grid-cols-2 gap-6">
+            <EpisodeMetricsChart
+              title="Coverage Rate (M₁) - Per Episode"
+              episodes={episodeHistory}
+              metric="M1"
+              targetValue={0.8}
+              targetLabel="Target ≥ 0.8"
+              yMin={0}
+              yMax={1}
+              goodDirection="up"
+            />
+            <EpisodeMetricsChart
+              title="Uniformity (M₂) - Per Episode"
+              episodes={episodeHistory}
+              metric="M2"
+              targetValue={0.2}
+              targetLabel="Target ≤ 0.2"
+              yMin={0}
+              yMax={1}
+              goodDirection="down"
+            />
+          </div>
+        )}
+
+        {/* Episode Comparison (最低5エピソード以降に表示 & パフォーマンス向上) */}
+        {episodeHistory.length >= 5 && (
+          <EpisodeComparison
+            episodes={episodeHistory}
+            shape={episodeConfig.shape || 'circle'}
+            gridSize={episodeConfig.grid_size || 64}
+            maxDisplay={4}
+          />
+        )}
+
         {/* 2-Column Grid: Actor and Critic Losses */}
         <div className="grid grid-cols-2 gap-6">
           <LossChart
-            title="Actor Loss Components"
+            title="Actor Loss"
             components={[
-              { label: 'Q-value', data: actorQValues, color: '#3b82f6' },
-              { label: 'Prior Reg.', data: actorPriorLoss, color: '#10b981' },
+              { label: 'Actor Loss', data: lossActorHistory.length > 0 ? lossActorHistory : [0], color: '#3b82f6' },
             ]}
           />
           <LossChart
-            title="Critic TD Error"
+            title="Critic Loss"
             components={[
-              { label: 'TD Error', data: criticTdError, color: '#ef4444' },
+              { label: 'Critic Loss', data: lossCriticHistory.length > 0 ? lossCriticHistory : [0], color: '#ef4444' },
             ]}
           />
         </div>

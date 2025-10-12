@@ -1,81 +1,44 @@
 import { useEffect, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui'
+import { generateShapeCells } from '@/utils/shapeGenerator'
 
 interface Robot {
   x: number
   y: number
-  id: number
+  vx?: number
+  vy?: number
+  id?: number
+}
+
+interface RobotTrajectory {
+  positions: Array<{ x: number; y: number; step: number }>
+  maxLength: number
 }
 
 interface RobotVisualizationProps {
   shape?: string
   robots?: Robot[]
+  trajectories?: RobotTrajectory[]
   rSense?: number
   rAvoid?: number
   width?: number
   height?: number
+  gridSize?: number  // バックエンドのgrid_size（デフォルト64）
+  showTrajectories?: boolean  // 軌跡表示のトグル
 }
 
 export default function RobotVisualization({
   shape = 'circle',
   robots = [],
+  trajectories = [],
   rSense = 0.4,
   rAvoid = 0.1,
   width = 600,
-  height = 400,
+  height = 600,
+  gridSize = 64,
+  showTrajectories = true,
 }: RobotVisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  // Generate target shape cells
-  const generateShapeCells = (shape: string, gridSize: number = 10) => {
-    const cells: Array<{ x: number; y: number }> = []
-    const centerX = gridSize / 2
-    const centerY = gridSize / 2
-
-    switch (shape.toLowerCase()) {
-      case 'circle':
-        for (let i = 0; i < gridSize; i++) {
-          for (let j = 0; j < gridSize; j++) {
-            const dx = i - centerX
-            const dy = j - centerY
-            if (dx * dx + dy * dy <= (gridSize / 3) ** 2) {
-              cells.push({ x: i, y: j })
-            }
-          }
-        }
-        break
-      case 'l':
-        for (let i = 0; i < gridSize; i++) {
-          if (i < gridSize * 0.7) cells.push({ x: 2, y: i })
-          if (i < gridSize * 0.4) cells.push({ x: 2 + i, y: Math.floor(gridSize * 0.7) })
-        }
-        break
-      case 'a':
-      case 't':
-      case 'm':
-      case 'r':
-        // Simplified shapes for other letters
-        for (let i = 0; i < gridSize; i++) {
-          for (let j = 0; j < gridSize; j++) {
-            if (Math.random() > 0.6) cells.push({ x: i, y: j })
-          }
-        }
-        break
-      default:
-        // Default to circle
-        for (let i = 0; i < gridSize; i++) {
-          for (let j = 0; j < gridSize; j++) {
-            const dx = i - centerX
-            const dy = j - centerY
-            if (dx * dx + dy * dy <= (gridSize / 3) ** 2) {
-              cells.push({ x: i, y: j })
-            }
-          }
-        }
-    }
-
-    return cells
-  }
 
   // Generate sample robots if none provided
   const sampleRobots: Robot[] =
@@ -83,8 +46,10 @@ export default function RobotVisualization({
       ? robots
       : Array.from({ length: 30 }, (_, i) => ({
           id: i,
-          x: Math.random() * 10,
-          y: Math.random() * 10,
+          x: Math.random() * gridSize,
+          y: Math.random() * gridSize,
+          vx: 0,
+          vy: 0,
         }))
 
   useEffect(() => {
@@ -98,7 +63,7 @@ export default function RobotVisualization({
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, width, height)
 
-    const gridSize = 10
+    // グリッド描画設定
     const cellSize = Math.min(width, height) / gridSize
     const offsetX = (width - gridSize * cellSize) / 2
     const offsetY = (height - gridSize * cellSize) / 2
@@ -115,10 +80,11 @@ export default function RobotVisualization({
       )
     })
 
-    // Draw grid lines
+    // Draw grid lines (間引いて表示: gridSizeが大きい場合は適度に)
     ctx.strokeStyle = '#e5e7eb'
-    ctx.lineWidth = 1
-    for (let i = 0; i <= gridSize; i++) {
+    ctx.lineWidth = 0.5
+    const gridStep = Math.max(1, Math.floor(gridSize / 20))  // 最大20本程度に間引き
+    for (let i = 0; i <= gridSize; i += gridStep) {
       ctx.beginPath()
       ctx.moveTo(offsetX + i * cellSize, offsetY)
       ctx.lineTo(offsetX + i * cellSize, offsetY + gridSize * cellSize)
@@ -130,17 +96,48 @@ export default function RobotVisualization({
       ctx.stroke()
     }
 
-    // Check collisions
+    // Check collisions (rAvoid は物理単位mなので、グリッド座標に変換)
+    // バックエンドのスケーリング: thr = max(1.0, 2*r_avoid * grid_size/16)
+    const collisionThreshold = Math.max(1.0, 2 * rAvoid * gridSize / 16)
     const collisions: Array<[Robot, Robot]> = []
     for (let i = 0; i < sampleRobots.length; i++) {
       for (let j = i + 1; j < sampleRobots.length; j++) {
         const dx = sampleRobots[i].x - sampleRobots[j].x
         const dy = sampleRobots[i].y - sampleRobots[j].y
         const distance = Math.sqrt(dx * dx + dy * dy)
-        if (distance < rAvoid * gridSize) {
+        if (distance < collisionThreshold) {
           collisions.push([sampleRobots[i], sampleRobots[j]])
         }
       }
+    }
+
+    // Draw trajectories (軌跡を描画 - パフォーマンス最適化版)
+    if (showTrajectories && trajectories.length > 0) {
+      ctx.lineWidth = 1.5
+      // 全軌跡をまとめて描画（パフォーマンス向上）
+      trajectories.forEach((trajectory) => {
+        if (trajectory.positions.length < 2) return
+
+        // パス全体を一度に構築
+        ctx.beginPath()
+        const firstPos = trajectory.positions[0]
+        ctx.moveTo(
+          offsetX + firstPos.x * cellSize,
+          offsetY + firstPos.y * cellSize
+        )
+        
+        for (let i = 1; i < trajectory.positions.length; i++) {
+          const pos = trajectory.positions[i]
+          ctx.lineTo(
+            offsetX + pos.x * cellSize,
+            offsetY + pos.y * cellSize
+          )
+        }
+        
+        // 半透明の青で描画
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)'
+        ctx.stroke()
+      })
     }
 
     // Draw collision lines (red)
@@ -165,21 +162,23 @@ export default function RobotVisualization({
       const y = offsetY + robot.y * cellSize
 
       // Draw sensing radius (light circle)
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
-      ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)'
+      // rSense は物理単位mなので、グリッド座標に変換（バックエンド: rs * grid_size/8）
+      const senseRadius = rSense * gridSize / 8 * cellSize
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.05)'
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.2)'
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.arc(x, y, rSense * cellSize * gridSize, 0, Math.PI * 2)
+      ctx.arc(x, y, senseRadius, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
 
       // Draw robot (blue dot)
       ctx.fillStyle = '#3b82f6'
       ctx.beginPath()
-      ctx.arc(x, y, 6, 0, Math.PI * 2)
+      ctx.arc(x, y, 4, 0, Math.PI * 2)  // 小さめのドット
       ctx.fill()
     })
-  }, [shape, robots, rSense, rAvoid, width, height, sampleRobots])
+  }, [shape, robots, trajectories, showTrajectories, rSense, rAvoid, width, height, gridSize])
 
   return (
     <Card>

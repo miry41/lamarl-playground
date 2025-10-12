@@ -8,6 +8,7 @@ interface TrainingControlsProps {
   step?: number
   maxSteps?: number
   converged?: boolean
+  disabled?: boolean
   onToggleTraining: () => void
   onReset: () => void
   onStepForward: () => void
@@ -20,6 +21,7 @@ export default function TrainingControls({
   step = 0,
   maxSteps = 200,
   converged = false,
+  disabled = false,
   onToggleTraining,
   onReset,
   onStepForward,
@@ -44,15 +46,28 @@ export default function TrainingControls({
           onClick={onToggleTraining}
           shape="circle"
           size="icon"
+          disabled={disabled}
         >
           {isTraining ? <Pause size={20} /> : <Play size={20} />}
         </Button>
 
-        <Button onClick={onReset} variant="outline" shape="circle" size="icon">
+        <Button 
+          onClick={onReset} 
+          variant="outline" 
+          shape="circle" 
+          size="icon"
+          disabled={disabled || isTraining}
+        >
           <RotateCcw size={18} />
         </Button>
 
-        <Button onClick={onStepForward} variant="outline" shape="circle" size="icon">
+        <Button 
+          onClick={onStepForward} 
+          variant="outline" 
+          shape="circle" 
+          size="icon"
+          disabled={disabled || isTraining}
+        >
           <SkipForward size={18} />
         </Button>
       </div>
