@@ -1,5 +1,4 @@
 export { default as MARLModuleRefactored } from './MARLModuleRefactored'
-export { default as EnvironmentDisplay } from './EnvironmentDisplay'
 export { default as TrainingControls } from './TrainingControls'
 export { default as AlgorithmSettings } from './AlgorithmSettings'
 export { default as PerformanceMetrics } from './PerformanceMetrics'

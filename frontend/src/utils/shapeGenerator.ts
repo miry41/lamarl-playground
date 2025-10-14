@@ -22,7 +22,7 @@ export function generateShapeCells(shape: string, gridSize: number = 64): ShapeC
   switch (shape.toLowerCase()) {
     case 'circle': {
       // 円形状（論文のデフォルト）
-      const radius = gridSize / 3
+      const radius = gridSize / 4
       for (let i = 0; i < gridSize; i++) {
         for (let j = 0; j < gridSize; j++) {
           const dx = i - centerX
@@ -130,7 +130,7 @@ export function generateShapeCells(shape: string, gridSize: number = 64): ShapeC
 
     default: {
       // デフォルトは円
-      const radius = gridSize / 3
+      const radius = gridSize / 4
       for (let i = 0; i < gridSize; i++) {
         for (let j = 0; j < gridSize; j++) {
           const dx = i - centerX

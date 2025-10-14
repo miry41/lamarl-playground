@@ -23,7 +23,7 @@ def coverage_m1(shape_mask: np.ndarray, robots_xy: np.ndarray, r_avoid: float) -
     occupied = (min_d < thr).sum()
     return float(occupied) / float(len(xs))
 
-def uniformity_m2(robots_xy: np.ndarray, shape_mask: np.ndarray, sample_k: int = 2000) -> float:
+def uniformity_m2(robots_xy: np.ndarray, shape_mask: np.ndarray, sample_k: int = 500) -> float:
     """
     Uniformity(M2): Voronoi によるセル割当の分散（小さいほど均一）
     - 全セルでの厳密計算は重いので、形状セルをランダムサンプリング

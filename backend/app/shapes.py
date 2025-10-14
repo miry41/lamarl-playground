@@ -8,7 +8,7 @@ def grid_mask(shape: str, size: int = 64) -> np.ndarray:
     m = np.zeros((size, size), dtype=np.uint8)
     yy, xx = np.mgrid[0:size, 0:size]
     cx, cy = size // 2, size // 2              # 図形中心
-    r = size // 3                               # 基準半径
+    r = size // 4                             # 基準半径（大幅に縮小）
 
     if shape == "circle":
         # 中心(cx,cy)・半径r の円内を1に

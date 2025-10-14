@@ -256,8 +256,8 @@ async def _train_loop(ep_id: str):
                 "velocities": env.v.tolist(),
                 "collisions": col_pairs,
             })
-            # ---- SSE イベント: metrics_update（間引き送信: 5ステップ毎）----
-            if t % 5 == 0:
+            # ---- SSE イベント: metrics_update（間引き送信: 10ステップ毎）----
+            if t % 10 == 0:
                 store["metrics"]["timeline"].append({
                     "type": "metrics_update",
                     "episode": ep,

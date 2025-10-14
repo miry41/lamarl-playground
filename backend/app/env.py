@@ -52,15 +52,16 @@ class SwarmEnv:
         # 自身状態（6）: 最後の2つは簡易タグ（将来拡張用のダミー）
         self_state = np.array([*self.p[i], *self.v[i], 0, 0], dtype=np.float32)
 
-        # 近傍（距離順に nhn 個）
+        # 近傍（距離順に nhn 個）- 最適化版
         rel = self.p - self.p[i]                                    # 相対位置
-        dist = np.sqrt((rel**2).sum(axis=1))                        # ユークリッド距離
-        idx = np.argsort(dist)                                      # 近い順にソート
+        dist_sq = (rel**2).sum(axis=1)                              # 距離の2乗（平方根回避）
+        max_dist_sq = (self.rs * self.grid_size/8) ** 2            # 閾値も2乗で事前計算
+        idx = np.argsort(dist_sq)                                   # 近い順にソート
         neigh = []
         cnt = 0
         # rs は物理m想定。グリッド座標に換算するため grid_size/8 でスケール（経験的）
         for j in idx[1:]:  # 自己(=i)除外
-            if dist[j] <= self.rs * self.grid_size/8 and cnt < self.nhn:
+            if dist_sq[j] <= max_dist_sq and cnt < self.nhn:
                 neigh += [rel[j,0], rel[j,1], self.v[j,0]-self.v[i,0], self.v[j,1]-self.v[i,1]]
                 cnt += 1
         # パディング（固定次元維持: 不足分のみゼロ埋め）

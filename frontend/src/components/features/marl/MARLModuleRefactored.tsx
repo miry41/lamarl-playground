@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui'
 import { MethodComparison } from '@/components/common'
-import EnvironmentDisplay from './EnvironmentDisplay'
 import TrainingControls from './TrainingControls'
 import AlgorithmSettings from './AlgorithmSettings'
 import TrainingParameters from './TrainingParameters'
@@ -124,16 +123,6 @@ export default function MARLModuleRefactored() {
             </div>
           )}
 
-          {/* Environment Display (read-only) */}
-          <EnvironmentDisplay
-            shape={episodeConfig.shape || 'circle'}
-            nRobots={episodeConfig.n_robot || 30}
-            rSense={episodeConfig.r_sense || 0.4}
-            rAvoid={episodeConfig.r_avoid || 0.1}
-            nHn={episodeConfig.nhn || 6}
-            nHc={episodeConfig.nhc || 80}
-            onEdit={handleEditEnvironment}
-          />
 
           {/* Training Controls (always visible) */}
           <TrainingControls

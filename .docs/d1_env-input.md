@@ -40,7 +40,7 @@
 
 ## ③ MARL（MADDPG）学習設定
 
-- **episodes（int）**: `3000`
+- **episodes（int）**: `100`
 - **episode_len（int）**: `200`
 - **batch_size（int）**: `512`
 - **hidden_dim（int）**: `180`

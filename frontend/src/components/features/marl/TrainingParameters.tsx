@@ -11,7 +11,7 @@ export default function TrainingParameters() {
           <FormField
             label="Episodes"
             type="number"
-            defaultValue="3000"
+            defaultValue="100"
             step={100}
           />
           <FormField

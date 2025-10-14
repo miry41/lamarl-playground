@@ -17,7 +17,7 @@ interface TrainingControlsProps {
 export default function TrainingControls({
   isTraining,
   episode,
-  maxEpisodes = 3000,
+  maxEpisodes = 100,
   step = 0,
   maxSteps = 200,
   converged = false,
@@ -107,7 +107,7 @@ export default function TrainingControls({
       {/* Estimated Time (if training) */}
       {isTraining && (
         <div className="text-xs text-muted-foreground">
-          Estimated: 2h 15m remaining
+          Estimated: 30m remaining
         </div>
       )}
     </section>
