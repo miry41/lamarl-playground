@@ -84,7 +84,7 @@ export interface TrainingState {
 interface MARLStore extends TrainingState {
   // Actions
   createNewEpisode: (config?: Partial<EpisodeConfig>) => Promise<void>
-  startTraining: (episodes?: number, episodeLen?: number) => Promise<void>
+  startTraining: (episodes?: number, episodeLen?: number, useLLM?: boolean, taskDescription?: string, llmModel?: string) => Promise<void>
   stopTraining: () => Promise<void>
   resetTraining: () => Promise<void>
   setEpisodeConfig: (config: Partial<EpisodeConfig>) => void
@@ -99,7 +99,7 @@ interface MARLStore extends TrainingState {
 const initialState: TrainingState = {
   episodeId: null,
   episodeConfig: {
-    shape: 'circle',
+    shape: 'circle',  // デフォルトはcircle
     n_robot: 30,
     r_sense: 0.4,
     r_avoid: 0.1,
@@ -165,7 +165,13 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
   },
 
   // 学習開始
-  startTraining: async (episodes = 1, episodeLen = 200) => {
+  startTraining: async (
+    episodes = 1, 
+    episodeLen = 200, 
+    useLLM = false, 
+    taskDescription?: string,
+    llmModel = 'gemini-2.0-flash-exp'
+  ) => {
     const { episodeId } = get()
     if (!episodeId) {
       set({ error: 'No episode ID. Create an episode first.' })
@@ -175,8 +181,10 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
     try {
       set({ error: null })
 
-      // バックエンドに学習開始リクエスト
-      await startTraining(episodeId, episodes, episodeLen)
+      // バックエンドに学習開始リクエスト（LLMパラメータ付き）
+      const response = await startTraining(episodeId, episodes, episodeLen, useLLM, taskDescription, llmModel)
+      
+      console.log('✅ Training start response:', response)
 
       // SSE接続を開始
       const cleanup = connectEventStream(
@@ -195,7 +203,7 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
         _cleanup: cleanup,
       })
 
-      console.log('✅ Training started:', episodeId)
+      console.log('✅ Training started:', episodeId, 'with LLM:', useLLM)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       set({ error: message, isTraining: false })
@@ -265,6 +273,47 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
     const state = get()
 
     switch (event.type) {
+      case 'env_config': {
+        // バックエンドからの環境設定を受信して検証
+        // フロントエンドの設定と異なる場合のみ更新（通常は一致するはず）
+        const currentConfig = state.episodeConfig
+        const backendConfig = {
+          shape: event.shape,
+          n_robot: event.n_robot,
+          r_sense: event.r_sense,
+          r_avoid: event.r_avoid,
+          nhn: event.n_hn,
+          nhc: event.n_hc,
+        }
+        
+        // 各パラメータを個別にチェック
+        const mismatches = []
+        if (currentConfig.shape !== event.shape) mismatches.push(`shape: ${currentConfig.shape} → ${event.shape}`)
+        if (currentConfig.n_robot !== event.n_robot) mismatches.push(`n_robot: ${currentConfig.n_robot} → ${event.n_robot}`)
+        if (currentConfig.r_sense !== event.r_sense) mismatches.push(`r_sense: ${currentConfig.r_sense} → ${event.r_sense}`)
+        if (currentConfig.r_avoid !== event.r_avoid) mismatches.push(`r_avoid: ${currentConfig.r_avoid} → ${event.r_avoid}`)
+        if (currentConfig.nhn !== event.n_hn) mismatches.push(`n_hn: ${currentConfig.nhn} → ${event.n_hn}`)
+        if (currentConfig.nhc !== event.n_hc) mismatches.push(`n_hc: ${currentConfig.nhc} → ${event.n_hc}`)
+        
+        if (mismatches.length > 0) {
+          console.warn('⚠️ Parameter mismatch detected!')
+          mismatches.forEach(mismatch => console.log('  ', mismatch))
+          console.log('🔄 Re-rendering with backend values')
+          
+          const newConfig = {
+            ...backendConfig,
+            grid_size: event.grid_size,
+            l_cell: event.l_cell,
+            seed: state.episodeConfig.seed || 1234,
+          }
+          
+          set({ episodeConfig: newConfig })
+        } else {
+          console.log('✅ env_config verified: all parameters match')
+        }
+        break
+      }
+
       case 'tick': {
         // ロボット位置更新
         const robots: Robot[] = event.positions.map((pos, i) => ({

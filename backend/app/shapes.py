@@ -15,11 +15,18 @@ def grid_mask(shape: str, size: int = 64) -> np.ndarray:
         m[((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r] = 1
 
     elif shape == "triangle":
-        # 正三角形（上頂点＋左右頂点）を NumPy の半平面判定で塗りつぶす
-        p1 = (cx,            cy - r)                         # 上
-        p2 = (cx - int(0.866 * r), cy + int(0.5 * r))       # 左下
-        p3 = (cx + int(0.866 * r), cy + int(0.5 * r))       # 右下
-        m = _triangle_mask(size, p1, p2, p3)
+        # 正三角形（簡易実装）
+        h = int(r * 1.2)  # 高さ
+        w = int(r * 1.0)  # 底辺の半分
+        for i in range(h):
+            # 各行の幅を計算（三角形の形状）
+            line_width = int(w * (h - i) / h)
+            if line_width > 0:
+                start_x = cx - line_width
+                end_x = cx + line_width
+                y = cy - r + i
+                if 0 <= y < size:
+                    m[y, max(0, start_x):min(size, end_x)] = 1
 
     elif shape == "square":
         # 中心正方形（やや大きめ）

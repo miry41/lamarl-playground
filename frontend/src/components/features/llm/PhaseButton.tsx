@@ -7,6 +7,7 @@ interface PhaseButtonProps {
   isActive: boolean
   isCompleted?: boolean
   onClick: () => void
+  disabled?: boolean
 }
 
 export default function PhaseButton({
@@ -16,17 +17,19 @@ export default function PhaseButton({
   isActive,
   isCompleted = false,
   onClick,
+  disabled = false,
 }: PhaseButtonProps) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         'w-full text-left p-4 rounded-lg border-2 transition-all',
-        'hover:border-primary/50',
+        disabled && !isActive
+          ? 'opacity-40 cursor-not-allowed'
+          : 'hover:border-primary/50',
         isActive
-          ? 'border-primary bg-primary/5'
-          : isCompleted
-          ? 'border-green-500/30 bg-green-500/5'
+          ? 'border-primary bg-primary/0'
           : 'border-border bg-background'
       )}
     >
@@ -47,9 +50,6 @@ export default function PhaseButton({
             )}
           >
             {title}
-            {isCompleted && !isActive && (
-              <span className="ml-2 text-green-500 text-xs">✓</span>
-            )}
           </div>
           <div className="text-xs text-muted-foreground line-clamp-2">
             {description}

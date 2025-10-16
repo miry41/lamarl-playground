@@ -29,10 +29,14 @@ export interface TrainStartRequest {
   episode_id: string
   episodes: number
   episode_len: number
+  use_llm?: boolean
+  task_description?: string
+  llm_model?: string
 }
 
 export interface TrainStartResponse {
   started: boolean
+  use_llm?: boolean
 }
 
 // SSE イベント型
@@ -69,7 +73,87 @@ export interface SSEEpisodeEndEvent {
   final_velocities: [number, number][]
 }
 
-export type SSEEvent = SSETickEvent | SSEMetricsEvent | SSEEpisodeEndEvent
+export interface SSEEnvConfigEvent {
+  type: 'env_config'
+  shape: string
+  n_robot: number
+  r_sense: number
+  r_avoid: number
+  n_hn: number
+  n_hc: number
+  grid_size: number
+  l_cell: number
+  use_llm: boolean
+}
+
+export type SSEEvent = SSETickEvent | SSEMetricsEvent | SSEEpisodeEndEvent | SSEEnvConfigEvent
+
+// ==================== LLM Types ====================
+
+export interface GenerateRequest {
+  task_description: string
+  shape: string
+  n_robot: number
+  r_sense: number
+  r_avoid: number
+  n_hn: number
+  n_hc: number
+  use_cot: boolean
+  use_basic_apis: boolean
+  model: string
+  temperature: number
+}
+
+export interface PriorTerm {
+  op: string
+  weight: number
+  radius?: number
+  cell_size?: number
+}
+
+export interface PriorDSL {
+  type: 'prior_policy_v1'
+  combination: 'weighted_sum'
+  terms: PriorTerm[]
+  clamp: { max_speed: number }
+}
+
+export interface RewardDSL {
+  type: 'reward_v1'
+  formula: string
+  clamp: { min: number; max: number }
+}
+
+export interface GenerateResponse {
+  prior: PriorDSL
+  reward: RewardDSL
+  cot_reasoning?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+export interface OperationInfo {
+  name: string
+  description: string
+  parameters: string[]
+  optional_parameters: string[]
+}
+
+export interface MetricInfo {
+  name: string
+  description: string
+  range: [number, number]
+}
+
+export interface OperationsResponse {
+  operations: OperationInfo[]
+  metrics: MetricInfo[]
+}
 
 // ==================== API Functions ====================
 
@@ -103,8 +187,8 @@ export async function createEpisode(
   const mergedConfig = { ...defaultConfig, ...config }
   const url = `${API_BASE}/episodes`
   
-  console.log('📡 Fetching:', url)
-  console.log('📡 Body:', mergedConfig)
+  // console.log('📡 Fetching:', url)
+  // console.log('📡 Body:', mergedConfig)
 
   const res = await fetch(url, {
     method: 'POST',
@@ -112,7 +196,7 @@ export async function createEpisode(
     body: JSON.stringify(mergedConfig),
   })
 
-  console.log('📡 Response status:', res.status, res.statusText)
+  // console.log('📡 Response status:', res.status, res.statusText)
 
   if (!res.ok) {
     const errorText = await res.text()
@@ -128,7 +212,7 @@ export async function createEpisode(
   }
 
   const data = await res.json()
-  console.log('📡 Response data:', data)
+  // console.log('📡 Response data:', data)
   return data
 }
 
@@ -138,16 +222,30 @@ export async function createEpisode(
 export async function startTraining(
   episodeId: string,
   episodes: number = 1,
-  episodeLen: number = 200
+  episodeLen: number = 200,
+  useLLM: boolean = false,
+  taskDescription?: string,
+  llmModel: string = 'gemini-2.0-flash-exp'
 ): Promise<TrainStartResponse> {
+  const body: TrainStartRequest = {
+    episode_id: episodeId,
+    episodes,
+    episode_len: episodeLen,
+    use_llm: useLLM,
+  }
+  
+  // LLMを使用する場合はパラメータを追加
+  if (useLLM) {
+    body.task_description = taskDescription
+    body.llm_model = llmModel
+  }
+  
+  console.log('🚀 Starting training with LLM:', useLLM, body)
+  
   const res = await fetch(`${API_BASE}/train`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      episode_id: episodeId,
-      episodes,
-      episode_len: episodeLen,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -206,5 +304,70 @@ export function connectEventStream(
   return () => {
     eventSource.close()
   }
+}
+
+// ==================== LLM API Functions ====================
+
+/**
+ * LLMを使用してPrior PolicyとReward Functionを生成
+ */
+export async function generateFunctions(
+  req: GenerateRequest
+): Promise<GenerateResponse> {
+  const res = await fetch(`${API_BASE}/llm/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+
+  if (!res.ok) {
+    const error = await res.json()
+    throw new Error(error.detail || 'Failed to generate functions')
+  }
+
+  return res.json()
+}
+
+/**
+ * Prior/Reward DSLのバリデーション
+ */
+export async function validateDSL(
+  prior: PriorDSL,
+  reward: RewardDSL
+): Promise<ValidationResult> {
+  const res = await fetch(`${API_BASE}/llm/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prior, reward }),
+  })
+
+  if (!res.ok) {
+    const error = await res.json()
+    throw new Error(error.detail || 'Failed to validate DSL')
+  }
+
+  return res.json()
+}
+
+/**
+ * 利用可能な操作とメトリクスのリストを取得
+ */
+export async function getOperations(): Promise<OperationsResponse> {
+  const res = await fetch(`${API_BASE}/llm/operations`)
+  
+  if (!res.ok) {
+    throw new Error('Failed to get operations')
+  }
+
+  return res.json()
+}
+
+/**
+ * LLMモジュールのヘルスチェック
+ */
+export async function llmHealthCheck(): Promise<{ status: string; module: string }> {
+  const res = await fetch(`${API_BASE}/llm/health`)
+  if (!res.ok) throw new Error('LLM health check failed')
+  return res.json()
 }
 

@@ -49,24 +49,45 @@ class MADDPGAgent:
         for d, s in zip(dst.parameters(), src.parameters()):
             d.data.copy_(s.data)
 
-    def act(self, obs, deterministic=False):
+    def act(self, obs, deterministic=False, prior_action=None, beta=0.0):
         """
         観測 obs（np.ndarray shape=(1, obs_dim)）から行動 a を出力
         - 推論時は Tanh 出力（-1..1）にノイズを付与（学習中）
+        - prior_action が与えられた場合、beta で融合する: a = (1-β)*πθ + β*πprior
+        
+        Args:
+            obs: 観測
+            deterministic: ノイズなしで行動を選択するか
+            prior_action: LLM生成のPrior Policy行動
+            beta: Prior融合係数（0.0〜1.0）
         """
         with torch.no_grad():
             a = self.actor(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
         a = a.cpu().numpy()
+        
+        # Prior Policy との融合
+        if prior_action is not None and beta > 0:
+            prior_action = np.array(prior_action).reshape(a.shape)
+            a = (1.0 - beta) * a + beta * prior_action
+        
+        # ノイズ付与（探索）
         if not deterministic:
             a += np.random.normal(0, self.noise, size=a.shape)
+        
         return np.clip(a, -1.0, 1.0)
 
-    def update(self, batch, reward_scale=1.0):
+    def update(self, batch, reward_scale=1.0, prior_actions=None, alpha_prior=0.0):
         """
         1回分の学習ステップ
         - Critic: MSE(Q - y)
-        - Actor: -Q(o, π(o)) を最小化（= Q を最大化）
+        - Actor: -Q(o, π(o)) + α * ||π(o) - πprior(o)||^2（LAMARL拡張）
         - Target: soft update
+        
+        Args:
+            batch: (obs, act, rew, nobs, done)のタプル
+            reward_scale: 報酬のスケーリング係数
+            prior_actions: LLM生成のPrior Policy行動（バッチサイズ分）
+            alpha_prior: Prior正則化係数（0.0〜1.0）
         """
         obs, act, rew, nobs, done = batch
         obs = torch.as_tensor(np.vstack(obs), dtype=torch.float32, device=self.device)
@@ -86,9 +107,16 @@ class MADDPGAgent:
         loss_c = ((q - y)**2).mean()
         self.opt_c.zero_grad(); loss_c.backward(); self.opt_c.step()
 
-        # アクター更新
+        # アクター更新（LAMARL拡張: Prior正則化項を追加）
         a = self.actor(obs)
         loss_a = - self.critic(torch.cat([obs, a], dim=1)).mean()
+        
+        # Prior Policy正則化項: α * ||πθ(s) - πprior(s)||^2
+        if prior_actions is not None and alpha_prior > 0:
+            prior_actions_t = torch.as_tensor(np.vstack(prior_actions), dtype=torch.float32, device=self.device)
+            prior_reg = alpha_prior * ((a - prior_actions_t) ** 2).mean()
+            loss_a = loss_a + prior_reg
+        
         self.opt_a.zero_grad(); loss_a.backward(); self.opt_a.step()
 
         # ターゲットのソフト更新
@@ -97,7 +125,6 @@ class MADDPGAgent:
         for tp, p in zip(self.critic_t.parameters(), self.critic.parameters()):
             tp.data.copy_(self.tau * p.data + (1 - self.tau) * tp.data)
 
-
         return float(loss_a.item()), float(loss_c.item())
         
 class MADDPGSystem:
@@ -105,6 +132,7 @@ class MADDPGSystem:
     マルチエージェント版（各エージェントを独立 DDPG として束ねる）
     - 局所 Q: Critic 入力は (o_i, a_i) のみ（論文で述べた拡張に合わせた簡易形）
     - ReplayBuffer もエージェントごとに持つ
+    - LAMARL拡張: Prior Policy統合機能を追加
     """
     def __init__(self, n_agents, obs_dim, **kw):
         # MADDPGAgentに渡すパラメータをフィルタリング
@@ -114,21 +142,60 @@ class MADDPGSystem:
         self.buffers = [ReplayBuffer(capacity=kw.get("capacity", 1_000_000)) for _ in range(n_agents)]
         self.batch = kw.get("batch", 512)
         self.warmup = kw.get("warmup_steps", 5000)
+        
+        # LAMARL拡張: Prior Policy & Reward Function
+        self.prior_policy_fn = None  # LLM生成のPrior Policy関数
+        self.reward_fn = None  # LLM生成のReward Function
+        self.alpha_prior = kw.get("alpha_prior", 0.1)  # Prior正則化係数
+        self.beta = kw.get("beta", 0.3)  # Prior融合係数
 
-    def act(self, obs_list, deterministic=False):
+    def set_prior_policy(self, prior_policy_fn):
+        """
+        LLM生成のPrior Policy関数を設定
+        Args:
+            prior_policy_fn: state_dict -> action (np.ndarray) を返す関数
+        """
+        self.prior_policy_fn = prior_policy_fn
+    
+    def set_reward_function(self, reward_fn):
+        """
+        LLM生成のReward Function関数を設定
+        Args:
+            reward_fn: metrics_dict -> reward (float) を返す関数
+        """
+        self.reward_fn = reward_fn
+
+    def act(self, obs_list, deterministic=False, state_dicts=None):
         """
         全エージェント分の行動をまとめて返す。
         obs_list: (n_agents, obs_dim) の np.ndarray
+        state_dicts: Prior Policy計算用の状態辞書リスト（オプション）
         """
         acts = []
-        for a, obs in zip(self.agents, obs_list):
-            acts.append(a.act(obs[None, ...], deterministic=deterministic)[0])
+        for i, (a, obs) in enumerate(zip(self.agents, obs_list)):
+            # Prior Policy行動を計算（もし設定されていれば）
+            prior_action = None
+            if self.prior_policy_fn is not None and state_dicts is not None and i < len(state_dicts):
+                try:
+                    prior_action = self.prior_policy_fn(state_dicts[i])
+                except Exception as e:
+                    print(f"⚠️ Prior policy error for agent {i}: {e}")
+                    prior_action = None
+            
+            # 行動選択（Prior融合あり）
+            action = a.act(obs[None, ...], deterministic=deterministic, 
+                          prior_action=prior_action, beta=self.beta)[0]
+            acts.append(action)
+        
         return np.array(acts, dtype=np.float32)
 
-    def step_update(self):
+    def step_update(self, prior_state_dicts_batch=None):
         """
         バッファが十分貯まっていれば、各エージェントを1ステップ更新。
         戻り: 代表的な actor/critic loss の平均（可視化用）
+        
+        Args:
+            prior_state_dicts_batch: Prior Policy計算用の状態辞書のバッチリスト（オプション）
         """
         if min(len(b) for b in self.buffers) < self.warmup:
             return None
@@ -136,6 +203,17 @@ class MADDPGSystem:
         for i, ag in enumerate(self.agents):
             b = self.buffers[i]
             obs, act, rew, nobs, done = b.sample(self.batch)
-            la_i, lc_i = ag.update((obs, act, rew, nobs, done))
+            
+            # Prior Policy行動を計算（もし設定されていれば）
+            prior_actions = None
+            if self.prior_policy_fn is not None and prior_state_dicts_batch is not None:
+                # バッチ内の各観測についてPrior行動を計算
+                # 注: 現実装では簡略化のため、prior_actionsはNoneのまま
+                # 完全な実装では、バッファからサンプリングした観測に対応する状態辞書を使用
+                pass
+            
+            la_i, lc_i = ag.update((obs, act, rew, nobs, done), 
+                                  prior_actions=prior_actions, 
+                                  alpha_prior=self.alpha_prior)
             la.append(la_i); lc.append(lc_i)
         return {"loss_actor": float(np.mean(la)), "loss_critic": float(np.mean(lc))}

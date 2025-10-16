@@ -35,6 +35,48 @@ export function generateShapeCells(shape: string, gridSize: number = 64): ShapeC
       break
     }
 
+    case 'square': {
+      // 正方形
+      const halfSize = Math.floor(gridSize * 0.275) // r * 1.1 相当
+      const startX = Math.floor(centerX - halfSize)
+      const endX = Math.floor(centerX + halfSize)
+      const startY = Math.floor(centerY - halfSize)
+      const endY = Math.floor(centerY + halfSize)
+      for (let i = startX; i < endX; i++) {
+        for (let j = startY; j < endY; j++) {
+          if (i >= 0 && i < gridSize && j >= 0 && j < gridSize) {
+            cells.push({ x: i, y: j })
+          }
+        }
+      }
+      break
+    }
+
+    case 'triangle': {
+      // 正三角形
+      const r = gridSize / 4
+      const h = Math.floor(r * 1.2) // 高さ
+      const w = Math.floor(r * 1.0) // 底辺の半分
+      const centerYStart = Math.floor(centerY - r)
+      
+      for (let i = 0; i < h; i++) {
+        const lineWidth = Math.floor(w * (h - i) / h)
+        if (lineWidth > 0) {
+          const startX = Math.floor(centerX - lineWidth)
+          const endX = Math.floor(centerX + lineWidth)
+          const y = centerYStart + i
+          if (y >= 0 && y < gridSize) {
+            for (let x = startX; x <= endX; x++) {
+              if (x >= 0 && x < gridSize) {
+                cells.push({ x, y })
+              }
+            }
+          }
+        }
+      }
+      break
+    }
+
     case 'l': {
       // L字形状
       for (let i = 0; i < gridSize; i++) {

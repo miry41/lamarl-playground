@@ -6,4 +6,7 @@ export { default as ProcessStepList } from './ProcessStepList'
 export { default as ProcessStep } from './ProcessStep'
 export { default as TaskInput } from './TaskInput'
 export { default as CodeViewer } from './CodeViewer'
+export { default as BasicAPIList } from './BasicAPIList'
+export { default as DSLViewer } from './DSLViewer'
+export { default as CoTViewer } from './CoTViewer'
 

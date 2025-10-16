@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Shape Generator Test</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    .shape-container {
+      display: inline-block;
+      margin: 10px;
+      text-align: center;
+    }
+    canvas {
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎨 Shape Generator Test</h1>
+  <div id="shapes"></div>
+
+  <script>
+    function generateShapeCells(shape, gridSize = 64) {
+      const cells = []
+      const centerX = gridSize / 2
+      const centerY = gridSize / 2
+
+      switch (shape.toLowerCase()) {
+        case 'circle': {
+          const radius = gridSize / 4
+          for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+              const dx = i - centerX
+              const dy = j - centerY
+              if (dx * dx + dy * dy <= radius * radius) {
+                cells.push({ x: i, y: j })
+              }
+            }
+          }
+          break
+        }
+
+        case 'square': {
+          const halfSize = Math.floor(gridSize * 0.275)
+          const startX = Math.floor(centerX - halfSize)
+          const endX = Math.floor(centerX + halfSize)
+          const startY = Math.floor(centerY - halfSize)
+          const endY = Math.floor(centerY + halfSize)
+          for (let i = startX; i < endX; i++) {
+            for (let j = startY; j < endY; j++) {
+              if (i >= 0 && i < gridSize && j >= 0 && j < gridSize) {
+                cells.push({ x: i, y: j })
+              }
+            }
+          }
+          break
+        }
+
+        case 'triangle': {
+          const r = gridSize / 4
+          const h = Math.floor(r * 1.2)
+          const w = Math.floor(r * 1.0)
+          const centerYStart = Math.floor(centerY - r)
+          
+          for (let i = 0; i < h; i++) {
+            const lineWidth = Math.floor(w * (h - i) / h)
+            if (lineWidth > 0) {
+              const startX = Math.floor(centerX - lineWidth)
+              const endX = Math.floor(centerX + lineWidth)
+              const y = centerYStart + i
+              if (y >= 0 && y < gridSize) {
+                for (let x = startX; x <= endX; x++) {
+                  if (x >= 0 && x < gridSize) {
+                    cells.push({ x, y })
+                  }
+                }
+              }
+            }
+          }
+          break
+        }
+
+        default: {
+          // デフォルトは円
+          const radius = gridSize / 4
+          for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+              const dx = i - centerX
+              const dy = j - centerY
+              if (dx * dx + dy * dy <= radius * radius) {
+                cells.push({ x: i, y: j })
+              }
+            }
+          }
+        }
+      }
+
+      return cells
+    }
+
+    function drawShape(shape, gridSize = 64) {
+      const container = document.createElement('div')
+      container.className = 'shape-container'
+
+      const title = document.createElement('h3')
+      title.textContent = shape
+      container.appendChild(title)
+
+      const canvas = document.createElement('canvas')
+      const size = 300
+      canvas.width = size
+      canvas.height = size
+      container.appendChild(canvas)
+
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, size, size)
+
+      const cellSize = size / gridSize
+      const cells = generateShapeCells(shape, gridSize)
+
+      const cellCount = document.createElement('p')
+      cellCount.textContent = `Cells: ${cells.length}`
+      container.appendChild(cellCount)
+
+      ctx.fillStyle = '#d1d5db'
+      cells.forEach(cell => {
+        ctx.fillRect(
+          cell.x * cellSize,
+          cell.y * cellSize,
+          cellSize,
+          cellSize
+        )
+      })
+
+      // Grid lines
+      ctx.strokeStyle = '#e5e7eb'
+      ctx.lineWidth = 0.5
+      for (let i = 0; i <= gridSize; i += 4) {
+        ctx.beginPath()
+        ctx.moveTo(i * cellSize, 0)
+        ctx.lineTo(i * cellSize, size)
+        ctx.stroke()
+
+        ctx.beginPath()
+        ctx.moveTo(0, i * cellSize)
+        ctx.lineTo(size, i * cellSize)
+        ctx.stroke()
+      }
+
+      document.getElementById('shapes').appendChild(container)
+    }
+
+    const shapes = ['circle', 'square', 'triangle', 'L', 'A', 'M', 'R']
+    shapes.forEach(shape => drawShape(shape))
+  </script>
+</body>
+</html>
+

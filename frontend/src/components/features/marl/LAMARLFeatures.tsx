@@ -1,15 +1,19 @@
 interface LAMARLFeaturesProps {
-  usePriorPolicy: boolean
-  useLLMReward: boolean
-  onPriorPolicyChange: (value: boolean) => void
-  onLLMRewardChange: (value: boolean) => void
+  useLLM: boolean
+  setUseLLM: (value: boolean) => void
+  taskDescription: string
+  setTaskDescription: (value: string) => void
+  llmModel: string
+  setLLMModel: (value: string) => void
 }
 
 export default function LAMARLFeatures({
-  usePriorPolicy,
-  useLLMReward,
-  onPriorPolicyChange,
-  onLLMRewardChange,
+  useLLM,
+  setUseLLM,
+  taskDescription,
+  setTaskDescription,
+  llmModel,
+  setLLMModel,
 }: LAMARLFeaturesProps) {
   return (
     <section>
@@ -18,27 +22,50 @@ export default function LAMARLFeatures({
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
-            checked={usePriorPolicy}
-            onChange={(e) => onPriorPolicyChange(e.target.checked)}
+            checked={useLLM}
+            onChange={(e) => setUseLLM(e.target.checked)}
             className="w-4 h-4"
           />
-          <span className="text-sm">Use Prior Policy</span>
+          <span className="text-sm">Use LLM-Generated Functions</span>
         </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={useLLMReward}
-            onChange={(e) => onLLMRewardChange(e.target.checked)}
-            className="w-4 h-4"
-          />
-          <span className="text-sm">Use LLM Reward</span>
-        </label>
+
+        {useLLM && (
+          <div className="space-y-3 pl-6 border-l-2 border-blue-200">
+            <div>
+              <label className="block text-xs font-medium mb-1">Task Description</label>
+              <textarea
+                value={taskDescription}
+                onChange={(e) => setTaskDescription(e.target.value)}
+                placeholder="例: 30台のロボットで円形を形成する"
+                className="w-full px-2 py-1 text-xs border rounded resize-none"
+                rows={2}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium mb-1">LLM Model</label>
+              <select
+                value={llmModel}
+                onChange={(e) => setLLMModel(e.target.value)}
+                className="w-full px-2 py-1 text-xs border rounded"
+              >
+                <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                <option value="mock">Mock (for testing)</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
-      {usePriorPolicy && (
-        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded text-xs">
-          <div className="font-semibold text-green-800 mb-1">Actor Loss Modified:</div>
-          <code className="text-green-700">maximize Q - α ‖a - a_prior‖²</code>
+      {useLLM && (
+        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
+          <div className="font-semibold text-blue-800 mb-1">🤖 LLM Integration Active:</div>
+          <ul className="text-blue-700 space-y-1 text-[10px]">
+            <li>• Prior Policy: a = (1-β)πθ + β·πprior</li>
+            <li>• Actor Loss: -Q + α‖πθ - πprior‖²</li>
+            <li>• Reward: LLM-generated formula</li>
+          </ul>
         </div>
       )}
     </section>

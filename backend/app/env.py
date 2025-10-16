@@ -40,6 +40,69 @@ class SwarmEnv:
             oi = self._obs_i(i)
             obs.append(oi)
         return np.array(obs, dtype=np.float32)
+    
+    def get_state_dicts(self):
+        """
+        LLM Prior Policy計算用の状態辞書リストを構築
+        各ロボットについて、位置、速度、目標中心、近傍ロボット、近傍セルの情報を含む
+        
+        Returns:
+            List[Dict]: 各ロボットの状態辞書のリスト
+        """
+        # 形状の中心を計算
+        ys, xs = np.where(self.mask == 1)
+        if len(xs) > 0:
+            target_center = np.array([xs.mean(), ys.mean()], dtype=np.float32)
+        else:
+            target_center = np.array([self.grid_size / 2, self.grid_size / 2], dtype=np.float32)
+        
+        state_dicts = []
+        for i in range(self.n):
+            # 近傍ロボットの情報を収集
+            rel = self.p - self.p[i]
+            dist_sq = (rel**2).sum(axis=1)
+            max_dist_sq = (self.rs * self.grid_size/8) ** 2
+            idx = np.argsort(dist_sq)
+            
+            neighbors = []
+            cnt = 0
+            for j in idx[1:]:  # 自己除外
+                if dist_sq[j] <= max_dist_sq and cnt < self.nhn:
+                    neighbors.append({
+                        "position": self.p[j].tolist(),
+                        "velocity": self.v[j].tolist(),
+                        "distance": np.sqrt(dist_sq[j])
+                    })
+                    cnt += 1
+            
+            # 近傍セル（形状セル）の情報
+            nearby_cells = []
+            k2 = min(self.nhc, len(xs))
+            if k2 > 0:
+                sel = self.rng.choice(len(xs), size=k2, replace=False)
+                for s in sel:
+                    cell_pos = np.array([xs[s], ys[s]], dtype=np.float32)
+                    # 占有状態を簡易判定（ロボットがセルに近いか）
+                    occupied = False
+                    for robot_pos in self.p:
+                        if np.linalg.norm(robot_pos - cell_pos) < self.ra * 2:
+                            occupied = True
+                            break
+                    nearby_cells.append({
+                        "position": cell_pos.tolist(),
+                        "occupied": occupied
+                    })
+            
+            state_dict = {
+                "position": self.p[i].tolist(),
+                "velocity": self.v[i].tolist(),
+                "target_center": target_center.tolist(),
+                "neighbors": neighbors,
+                "nearby_cells": nearby_cells
+            }
+            state_dicts.append(state_dict)
+        
+        return state_dicts
 
     def _obs_i(self, i):
         """

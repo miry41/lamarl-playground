@@ -21,6 +21,7 @@ interface RobotVisualizationProps {
   trajectories?: RobotTrajectory[]
   rSense?: number
   rAvoid?: number
+  nRobot?: number  // ロボット数（サンプル生成用）
   width?: number
   height?: number
   gridSize?: number  // バックエンドのgrid_size（デフォルト64）
@@ -33,6 +34,7 @@ export default function RobotVisualization({
   trajectories = [],
   rSense = 0.4,
   rAvoid = 0.1,
+  nRobot = 30,
   width = 600,
   height = 600,
   gridSize = 64,
@@ -44,7 +46,7 @@ export default function RobotVisualization({
   const sampleRobots: Robot[] =
     robots.length > 0
       ? robots
-      : Array.from({ length: 30 }, (_, i) => ({
+      : Array.from({ length: nRobot }, (_, i) => ({
           id: i,
           x: Math.random() * gridSize,
           y: Math.random() * gridSize,
@@ -58,6 +60,14 @@ export default function RobotVisualization({
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+  // console.log('🎨 RobotVisualization rendering:', {
+  //   shape,
+  //   nRobot,
+  //   rSense,
+  //   rAvoid,
+  //   sampleRobotsCount: sampleRobots.length
+  // })
 
     // Clear canvas
     ctx.fillStyle = '#ffffff'
@@ -178,7 +188,7 @@ export default function RobotVisualization({
       ctx.arc(x, y, 4, 0, Math.PI * 2)  // 小さめのドット
       ctx.fill()
     })
-  }, [shape, robots, trajectories, showTrajectories, rSense, rAvoid, width, height, gridSize])
+  }, [shape, robots, trajectories, showTrajectories, rSense, rAvoid, nRobot, width, height, gridSize])
 
   return (
     <Card>
@@ -199,6 +209,14 @@ export default function RobotVisualization({
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded-full bg-blue-500"></div>
             <span>Robots ({sampleRobots.length})</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 bg-blue-300"></div>
+            <span>Sensing: {rSense}m</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 bg-red-300"></div>
+            <span>Avoid: {rAvoid}m</span>
           </div>
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded-full bg-gray-300"></div>

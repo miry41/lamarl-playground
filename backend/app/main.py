@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, Optional
 import asyncio, json
 import numpy as np
 
@@ -12,7 +12,15 @@ from .env import SwarmEnv
 from .marl import MADDPGSystem
 from .metrics import coverage_m1, uniformity_m2
 
-app = FastAPI()
+# LLMモジュール
+from .llm.router import router as llm_router
+from .llm.client import generate_prior_reward_dsl
+from .llm.dsl_runtime import build_prior_fn, build_reward_fn
+
+app = FastAPI(title="LAMARL Backend API", version="1.0.0")
+
+# LLMルーターを登録
+app.include_router(llm_router)
 
 # CORS設定（フロントエンドからのアクセスを許可）
 app.add_middleware(
@@ -52,10 +60,16 @@ class TrainStart(BaseModel):
     学習開始リクエスト。
     - episodes: 何エピソード回すか
     - episode_len: 1エピソードあたりのステップ数
+    - use_llm: LLM生成のPrior/Rewardを使用するか
+    - task_description: LLM生成用のタスク記述
+    - llm_model: 使用するLLMモデル
     """
     episode_id: str
     episodes: int = 1
     episode_len: int = 200
+    use_llm: bool = False
+    task_description: Optional[str] = None
+    llm_model: str = "gemini-2.0-flash-exp"
 
 # ------- 基本ヘルスチェック -------
 
@@ -114,6 +128,7 @@ async def start_train(req: TrainStart):
     学習ループを asyncio タスクで起動。
     - このAPIは即時に {started: true} を返し、
       実際の進捗は /stream の SSE で受け取る。
+    - use_llm=True の場合、LLM生成のPrior/Rewardを使用
     """
     if req.episode_id not in EPISODES:
         raise HTTPException(404, "episode not found")
@@ -122,10 +137,61 @@ async def start_train(req: TrainStart):
     store["episode_len"] = req.episode_len
     store["should_stop"] = False  # 停止フラグをリセット
     store["metrics"]["timeline"].clear()  # 古いイベントをクリア
+    
+    # LLM生成のPrior/Reward設定
+    if req.use_llm:
+        try:
+            print(f"🤖 LLM生成開始: model={req.llm_model}")
+            cfg = store["cfg"]
+            
+            # タスク記述のデフォルト生成
+            task_desc = req.task_description or f"{cfg.n_robot}台のロボットで{cfg.shape}形状を形成する"
+            
+            # LLM生成
+            env_params = {
+                "shape": cfg.shape,
+                "n_robot": cfg.n_robot,
+                "r_sense": cfg.r_sense,
+                "r_avoid": cfg.r_avoid,
+                "n_hn": cfg.nhn,
+                "n_hc": cfg.nhc,
+            }
+            
+            dsl = generate_prior_reward_dsl(
+                task_description=task_desc,
+                env_params=env_params,
+                model=req.llm_model,
+                temperature=0.7,
+                use_cot=True,
+                use_basic_apis=True
+            )
+            
+            # DSLから実行可能な関数を構築
+            prior_fn = build_prior_fn(dsl["prior"])
+            reward_fn = build_reward_fn(dsl["reward"])
+            
+            # MADDPGSystemに設定
+            maddpg: MADDPGSystem = store["rl"]
+            maddpg.set_prior_policy(prior_fn)
+            maddpg.set_reward_function(reward_fn)
+            
+            # メタデータを保存
+            store["llm_dsl"] = dsl
+            store["use_llm"] = True
+            
+            print(f"✅ LLM生成完了: Prior={len(dsl['prior']['terms'])}項, Reward={dsl['reward']['formula']}")
+            
+        except Exception as e:
+            print(f"⚠️ LLM生成エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(500, f"LLM生成失敗: {str(e)}")
+    else:
+        store["use_llm"] = False
 
     # 学習タスク（同プロセス/同スレッド）をバックグラウンドで開始
     asyncio.create_task(_train_loop(req.episode_id))
-    return {"started": True}
+    return {"started": True, "use_llm": req.use_llm}
 
 # ------- 学習停止 -------
 
@@ -203,6 +269,20 @@ async def _train_loop(ep_id: str):
     cfg = store["cfg"]
     E = store["episodes_total"]; T = store["episode_len"]
     
+    # ---- SSE イベント: 環境設定を最初に送信 ----
+    store["metrics"]["timeline"].append({
+        "type": "env_config",
+        "shape": cfg.shape,
+        "n_robot": cfg.n_robot,
+        "r_sense": cfg.r_sense,
+        "r_avoid": cfg.r_avoid,
+        "n_hn": cfg.nhn,
+        "n_hc": cfg.nhc,
+        "grid_size": env.grid_size,
+        "l_cell": env.lc,
+        "use_llm": store.get("use_llm", False),
+    })
+    
     global_step = 0  # 全エピソードを通じた累積ステップ数
 
     for ep in range(E):
@@ -222,7 +302,12 @@ async def _train_loop(ep_id: str):
                 break
             
             # 行動サンプリング（全エージェント分）
-            acts = maddpg.act(obs, deterministic=False)
+            # LLM Prior Policyを使用する場合は、状態辞書を渡す
+            state_dicts = None
+            if store.get("use_llm", False):
+                state_dicts = env.get_state_dicts()
+            
+            acts = maddpg.act(obs, deterministic=False, state_dicts=state_dicts)
 
             # 環境1ステップ
             nobs, col_pairs = env.step(acts)
@@ -231,9 +316,27 @@ async def _train_loop(ep_id: str):
             M1 = coverage_m1(env.mask, env.p, cfg.r_avoid)
             M2 = uniformity_m2(env.p, env.mask)
 
-            # 成功条件によるスパース報酬（論文の最終判定に準拠した簡略形）
+            # 報酬計算: LLM生成のReward Functionを使用する場合はそれを、そうでなければスパース報酬
+            if store.get("use_llm", False) and maddpg.reward_fn is not None:
+                try:
+                    # 衝突数を計算
+                    n_collisions = len(col_pairs)
+                    # LLM生成のReward Functionで報酬を計算
+                    rew_scalar = maddpg.reward_fn({
+                        "coverage": float(M1),
+                        "uniformity": float(M2),
+                        "collisions": float(n_collisions)
+                    })
+                except Exception as e:
+                    print(f"⚠️ Reward function error: {e}")
+                    # フォールバック: スパース報酬
+                    rew_scalar = 1.0 if (M1 > 0.8 and M2 < 0.2) else 0.0
+            else:
+                # デフォルト: スパース報酬（論文の最終判定に準拠した簡略形）
+                rew_scalar = 1.0 if (M1 > 0.8 and M2 < 0.2) else 0.0
+            
+            # 成功判定（早期終了用）
             done = 1.0 if (M1 > 0.8 and M2 < 0.2) else 0.0
-            rew_scalar = 1.0 if done == 1.0 else 0.0
 
             # 各エージェントに同一報酬（協調タスクの最小実装）
             for i in range(cfg.n_robot):

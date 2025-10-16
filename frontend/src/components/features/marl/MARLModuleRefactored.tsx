@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui'
 import { MethodComparison } from '@/components/common'
 import TrainingControls from './TrainingControls'
@@ -15,7 +15,9 @@ import LossChart from './LossChart'
 import ActionBlending from './ActionBlending'
 import ReplayBufferStatus from './ReplayBufferStatus'
 import LLMGeneratedFunctions from './LLMGeneratedFunctions'
+import EnvironmentDisplay from './EnvironmentDisplay'
 import { useMARLStore } from '@/store/useMARLStore'
+import { useLLMStore } from '@/store/useLLMStore'
 
 const methods = [
   { name: 'LAMARL (Ours)', value: 95, color: 'bg-blue-500' },
@@ -49,18 +51,65 @@ export default function MARLModuleRefactored() {
     startTraining,
     stopTraining,
     resetTraining,
+    setEpisodeConfig,
   } = useMARLStore()
 
   // Local UI state
-  const [usePriorPolicy, setUsePriorPolicy] = useState(true)
-  const [useLLMReward, setUseLLMReward] = useState(true)
-  const [beta, setBeta] = useState(0.3)
+  const [useLLM, setUseLLM] = useState(true)
+  const [taskDescription, setTaskDescription] = useState('')
+  const [llmModel, setLLMModel] = useState('gemini-2.0-flash-exp')
+  const [beta, setBeta] = useState(0.3)  // Prior融合係数
+  
+  // 初期化フラグ（React Strict Modeでの重複実行を防ぐ）
+  const isInitialized = useRef(false)
 
-  // エピソード作成（初回マウント時のみ）
+  // LLMタブの設定を常に監視して、MARLタブの形状を同期
   useEffect(() => {
-    if (!episodeId) {
-      console.log('🔄 Creating new episode...')
-      createNewEpisode()
+    // 初期設定を即座に反映（値をクランプして安全に使用）
+    const llmConfig = useLLMStore.getState().request
+    // console.log('🔄 Initial LLM config:', llmConfig.shape)
+    
+    // 値をクランプ（バックエンドのスキーマに合わせる）
+    const safeConfig = {
+      shape: llmConfig.shape,
+      n_robot: Math.max(1, Math.min(100, llmConfig.n_robot)),
+      r_sense: Math.max(0.1, Math.min(1.0, llmConfig.r_sense)),
+      r_avoid: Math.max(0.01, Math.min(0.5, llmConfig.r_avoid)),
+      nhn: Math.max(1, Math.min(20, llmConfig.n_hn)),
+      nhc: Math.max(10, Math.min(200, llmConfig.n_hc)),
+    }
+    
+    setEpisodeConfig(safeConfig)
+    
+    // エピソードがない場合は作成（重複防止）
+    if (!episodeId && !isInitialized.current) {
+      isInitialized.current = true
+      // console.log('🆕 Creating initial episode with config:', safeConfig)
+      createNewEpisode(safeConfig)
+    }
+    
+    // LLMタブの設定変更を監視（リアルタイム同期）
+    const unsubscribe = useLLMStore.subscribe((state) => {
+      const newConfig = state.request
+      
+      // 値をクランプ（バックエンドのスキーマに合わせる）
+      const safeConfig = {
+        shape: newConfig.shape,
+        n_robot: Math.max(1, Math.min(100, newConfig.n_robot)),
+        r_sense: Math.max(0.1, Math.min(1.0, newConfig.r_sense)),
+        r_avoid: Math.max(0.01, Math.min(0.5, newConfig.r_avoid)),
+        nhn: Math.max(1, Math.min(20, newConfig.n_hn)),
+        nhc: Math.max(10, Math.min(200, newConfig.n_hc)),
+      }
+      
+      console.log('🎨 LLM config changed → updating MARL tab:', safeConfig)
+      setEpisodeConfig(safeConfig)
+    })
+    
+    // クリーンアップ
+    return () => {
+      // console.log('🧹 Unsubscribing from LLM store')
+      unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -74,24 +123,29 @@ export default function MARLModuleRefactored() {
     if (isTraining) {
       await stopTraining()
     } else {
-      // エピソードがまだ作成されていない場合は作成
+      // エピソードがまだ作成されていない場合はエラー
       if (!episodeId) {
-        console.log('⚠️ No episode ID, creating one first...')
-        await createNewEpisode()
-        // 少し待ってからエピソードIDを再取得
-        const newEpisodeId = useMARLStore.getState().episodeId
-        if (!newEpisodeId) {
-          console.error('❌ Failed to create episode')
-          return
-        }
+        console.error('❌ No episode ID')
+        return
       }
-      await startTraining(100, 200)  // 100エピソード、各200ステップ（3000は長すぎる）
+      
+      // LLMを使用する場合はタスク記述を自動生成
+      const autoTaskDescription = taskDescription || 
+        `${episodeConfig.n_robot}台のロボットで${episodeConfig.shape}形状を形成する`
+      
+      console.log('▶️ Starting training with shape:', episodeConfig.shape)
+      await startTraining(100, 200, useLLM, autoTaskDescription, llmModel)
     }
   }
 
   const handleReset = async () => {
     await resetTraining()
   }
+
+  // デバッグログ: episodeConfigの変更を監視
+  // useEffect(() => {
+  //   console.log('🎨 UI updated: shape =', episodeConfig.shape)
+  // }, [episodeConfig])
 
   return (
     <div className="flex h-full">
@@ -138,16 +192,29 @@ export default function MARLModuleRefactored() {
             onStepForward={() => {}}  // TODO: step forward implementation
           />
 
+          {/* Environment Display (リアルタイム同期) */}
+          <EnvironmentDisplay
+            shape={episodeConfig.shape}
+            nRobots={episodeConfig.n_robot}
+            rSense={episodeConfig.r_sense}
+            rAvoid={episodeConfig.r_avoid}
+            nHn={episodeConfig.nhn}
+            nHc={episodeConfig.nhc}
+            onEdit={handleEditEnvironment}
+          />
+
           {/* Accordion for other settings */}
           <Accordion type="multiple" defaultValue={['lamarl']}>
             <AccordionItem value="lamarl">
               <AccordionTrigger>⭐ LAMARL Features</AccordionTrigger>
               <AccordionContent>
                 <LAMARLFeatures
-                  usePriorPolicy={usePriorPolicy}
-                  useLLMReward={useLLMReward}
-                  onPriorPolicyChange={setUsePriorPolicy}
-                  onLLMRewardChange={setUseLLMReward}
+                  useLLM={useLLM}
+                  setUseLLM={setUseLLM}
+                  taskDescription={taskDescription}
+                  setTaskDescription={setTaskDescription}
+                  llmModel={llmModel}
+                  setLLMModel={setLLMModel}
                 />
               </AccordionContent>
             </AccordionItem>
@@ -185,6 +252,7 @@ export default function MARLModuleRefactored() {
           trajectories={trajectories}
           rSense={episodeConfig.r_sense || 0.4}
           rAvoid={episodeConfig.r_avoid || 0.1}
+          nRobot={episodeConfig.n_robot || 30}
           gridSize={episodeConfig.grid_size || 64}
           showTrajectories={true}
         />

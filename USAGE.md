@@ -7,9 +7,8 @@
 ### 1. バックエンドの起動
 
 ```bash
-cd backend
-# 仮想環境がある場合はアクティベート
-source .venv/bin/activate  # または: .venv\Scripts\activate (Windows)
+cd backend && source .venv/bin/activate
+# または: .venv\Scripts\activate (Windows)
 
 # サーバー起動
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
