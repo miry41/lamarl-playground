@@ -1,4 +1,5 @@
-import { ComponentPropsWithoutRef, forwardRef } from 'react'
+import { forwardRef } from 'react'
+import type { ComponentPropsWithoutRef } from 'react'
 
 interface SliderProps extends Omit<ComponentPropsWithoutRef<'input'>, 'type' | 'value' | 'onChange'> {
   min?: number
