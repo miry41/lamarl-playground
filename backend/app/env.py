@@ -49,19 +49,26 @@ class SwarmEnv:
         Returns:
             List[Dict]: 各ロボットの状態辞書のリスト
         """
-        # 形状の中心を計算
+        # 形状の中心を計算（キャッシュ化）
         ys, xs = np.where(self.mask == 1)
         if len(xs) > 0:
             target_center = np.array([xs.mean(), ys.mean()], dtype=np.float32)
         else:
             target_center = np.array([self.grid_size / 2, self.grid_size / 2], dtype=np.float32)
         
+        # 近傍セルをランダムサンプリング（全ロボット共通）
+        k2 = min(self.nhc, len(xs))
+        nearby_cell_indices = self.rng.choice(len(xs), size=k2, replace=False) if k2 > 0 else []
+        
+        # 距離計算用の閾値（事前計算）
+        max_dist_sq = (self.rs * self.grid_size/8) ** 2
+        occupy_dist = self.ra * 2
+        
         state_dicts = []
         for i in range(self.n):
-            # 近傍ロボットの情報を収集
+            # 近傍ロボットの情報を収集（最適化済み）
             rel = self.p - self.p[i]
             dist_sq = (rel**2).sum(axis=1)
-            max_dist_sq = (self.rs * self.grid_size/8) ** 2
             idx = np.argsort(dist_sq)
             
             neighbors = []
@@ -71,26 +78,22 @@ class SwarmEnv:
                     neighbors.append({
                         "position": self.p[j].tolist(),
                         "velocity": self.v[j].tolist(),
-                        "distance": np.sqrt(dist_sq[j])
+                        "distance": float(np.sqrt(dist_sq[j]))
                     })
                     cnt += 1
             
-            # 近傍セル（形状セル）の情報
+            # 近傍セル（形状セル）の情報（最適化: ベクトル化）
             nearby_cells = []
-            k2 = min(self.nhc, len(xs))
             if k2 > 0:
-                sel = self.rng.choice(len(xs), size=k2, replace=False)
-                for s in sel:
-                    cell_pos = np.array([xs[s], ys[s]], dtype=np.float32)
-                    # 占有状態を簡易判定（ロボットがセルに近いか）
-                    occupied = False
-                    for robot_pos in self.p:
-                        if np.linalg.norm(robot_pos - cell_pos) < self.ra * 2:
-                            occupied = True
-                            break
+                cell_positions = np.stack([xs[nearby_cell_indices], ys[nearby_cell_indices]], axis=1).astype(np.float32)
+                # 全ロボットとの距離を一度に計算（ベクトル化）
+                dists = np.linalg.norm(self.p[:, None, :] - cell_positions[None, :, :], axis=2)
+                occupied = (dists < occupy_dist).any(axis=0)
+                
+                for s_idx, occ in zip(nearby_cell_indices, occupied):
                     nearby_cells.append({
-                        "position": cell_pos.tolist(),
-                        "occupied": occupied
+                        "position": [float(xs[s_idx]), float(ys[s_idx])],
+                        "occupied": bool(occ)
                     })
             
             state_dict = {
@@ -175,15 +178,32 @@ class SwarmEnv:
         self.p = np.clip(self.p, 0, self.grid_size-1)
 
         # 簡易衝突: 2*ra 未満 → 反発（速度に小さな押し出しを加える）
+        # パフォーマンス改善: ベクトル化による最適化
         col_pairs = []
         thr = max(1.0, 2*self.ra * self.grid_size/16)  # グリッドスケール換算の閾値
-        for i in range(self.n):
-            for j in range(i+1, self.n):
-                d = np.linalg.norm(self.p[i]-self.p[j])
-                if d < thr:
-                    col_pairs.append((i,j))
-                    dir = (self.p[i]-self.p[j])/(d+1e-6)
-                    self.v[i] += dir*0.2; self.v[j] -= dir*0.2
+        
+        # 全ペア間の距離を一度に計算（ベクトル化）
+        diff = self.p[:, None, :] - self.p[None, :, :]  # (n, n, 2)
+        dist = np.linalg.norm(diff, axis=2)  # (n, n)
+        
+        # 上三角行列のみ処理（i < j のペアのみ）
+        i_idx, j_idx = np.triu_indices(self.n, k=1)
+        collision_mask = dist[i_idx, j_idx] < thr
+        
+        if collision_mask.any():
+            # 衝突しているペアのインデックス
+            collision_i = i_idx[collision_mask]
+            collision_j = j_idx[collision_mask]
+            
+            # 衝突ペアをリストに追加
+            col_pairs = list(zip(collision_i.tolist(), collision_j.tolist()))
+            
+            # 衝突時の反発力を一括計算
+            for i, j in col_pairs:
+                d = dist[i, j]
+                dir_vec = diff[i, j] / (d + 1e-6)
+                self.v[i] += dir_vec * 0.2
+                self.v[j] -= dir_vec * 0.2
 
         obs = self.observe()
         return obs, col_pairs
