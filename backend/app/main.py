@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Dict, Optional
 import asyncio, json
 import numpy as np
+import os
 
 # ユーティリティ/環境/MARL/メトリクス
 from .utils import make_id
@@ -23,13 +24,23 @@ app = FastAPI(title="LAMARL Backend API", version="1.0.0")
 app.include_router(llm_router)
 
 # CORS設定（フロントエンドからのアクセスを許可）
+# 環境変数からフロントエンドURLを取得
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+allowed_origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",  # Vite alternative port
+    "http://localhost:3000",
+]
+
+# VercelのフロントエンドURLを追加
+if FRONTEND_URL:
+    allowed_origins.append(FRONTEND_URL)
+    # Vercelのプレビュー環境も許可（オプション）
+    # allowed_origins.append("https://*.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",  # Vite alternative port
-        "http://localhost:3000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
