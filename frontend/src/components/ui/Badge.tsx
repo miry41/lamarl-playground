@@ -1,4 +1,5 @@
-import { ComponentPropsWithoutRef, forwardRef } from 'react'
+import { forwardRef } from 'react'
+import type { ComponentPropsWithoutRef } from 'react'
 
 interface BadgeProps extends ComponentPropsWithoutRef<'span'> {
   variant?: 'default' | 'success' | 'warning' | 'error' | 'info'

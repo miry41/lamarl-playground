@@ -1,24 +1,23 @@
 import { Label, Input, Select } from '@/components/ui'
-import { InputHTMLAttributes, SelectHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, SelectHTMLAttributes } from 'react'
 
-interface FormFieldProps {
+interface BaseFormFieldProps {
   label: string
-  type?: 'input' | 'select'
   children?: React.ReactNode
 }
 
-type InputFieldProps = FormFieldProps &
+type InputFieldProps = BaseFormFieldProps &
   InputHTMLAttributes<HTMLInputElement> & {
-    type?: 'input'
+    type?: 'text' | 'number' | 'email' | 'password' | 'url' | 'tel' | 'search' | 'date' | 'time' | 'datetime-local' | 'month' | 'week'
   }
 
-type SelectFieldProps = FormFieldProps &
+type SelectFieldProps = BaseFormFieldProps &
   SelectHTMLAttributes<HTMLSelectElement> & {
     type: 'select'
   }
 
 export default function FormField(props: InputFieldProps | SelectFieldProps) {
-  const { label, type = 'input', children, ...rest } = props
+  const { label, type = 'text', children, ...rest } = props
 
   return (
     <div>
@@ -28,7 +27,7 @@ export default function FormField(props: InputFieldProps | SelectFieldProps) {
           {children}
         </Select>
       ) : (
-        <Input {...(rest as InputHTMLAttributes<HTMLInputElement>)} />
+        <Input type={type as string} {...(rest as InputHTMLAttributes<HTMLInputElement>)} />
       )}
     </div>
   )

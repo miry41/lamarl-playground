@@ -129,11 +129,11 @@ const initialState: TrainingState = {
   lossCriticHistory: [],
   converged: false,
   error: null,
-  _cleanup: null,
 }
 
 export const useMARLStore = create<MARLStore>((set, get) => ({
   ...initialState,
+  _cleanup: null,
 
   // エピソード作成
   createNewEpisode: async (config = {}) => {
@@ -189,8 +189,8 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
       // SSE接続を開始
       const cleanup = connectEventStream(
         episodeId,
-        (event) => get()._handleSSEEvent(event),
-        (err) => set({ error: err.message, isConnected: false })
+        (event: SSEEvent) => get()._handleSSEEvent(event),
+        (err: Error) => set({ error: err.message, isConnected: false })
       )
 
       set({
@@ -316,7 +316,7 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
 
       case 'tick': {
         // ロボット位置更新
-        const robots: Robot[] = event.positions.map((pos, i) => ({
+        const robots: Robot[] = event.positions.map((pos: [number, number], i: number) => ({
           x: pos[0],
           y: pos[1],
           vx: event.velocities[i]?.[0] || 0,
@@ -325,7 +325,7 @@ export const useMARLStore = create<MARLStore>((set, get) => ({
 
         // 軌跡更新（最大50ポイントに削減 & パフォーマンス最適化）
         const maxTrajectoryLength = 50  // 100→50に削減
-        const newTrajectories = event.positions.map((pos, i) => {
+        const newTrajectories = event.positions.map((pos: [number, number], i: number) => {
           const existingTrajectory = state.trajectories[i]
           if (!existingTrajectory) {
             return {

@@ -15,7 +15,7 @@ export default function PhaseButton({
   title,
   description,
   isActive,
-  isCompleted = false,
+  isCompleted: _isCompleted = false,
   onClick,
   disabled = false,
 }: PhaseButtonProps) {

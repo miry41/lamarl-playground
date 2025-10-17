@@ -164,7 +164,7 @@ export default function LLMModuleRefactored() {
   }
 
   // フェーズをクリックできるかどうか判定（常にfalse - クリック禁止）
-  const canNavigateToPhase = (phase: Phase): boolean => {
+  const canNavigateToPhase = (_phase: Phase): boolean => {
     return false // 全てのフェーズボタンをクリック禁止
   }
 

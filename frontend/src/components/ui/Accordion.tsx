@@ -76,7 +76,8 @@ const AccordionItem = ({ children, value, className }: AccordionItemProps) => {
     <div className={cn('border border-border rounded', className)}>
       {React.Children.map(children, child => {
         if (React.isValidElement(child)) {
-          return React.cloneElement(child, { ...child.props, itemValue: value, isOpen } as any)
+          const childProps = child.props as Record<string, unknown>
+          return React.cloneElement(child, { ...childProps, itemValue: value, isOpen } as React.Attributes)
         }
         return child
       })}
