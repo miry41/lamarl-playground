@@ -31,11 +31,13 @@ origins = [
     "http://localhost:5173",  # ローカル開発環境
     "http://localhost:5174",  # Vite alternative port
     "http://localhost:3000",
+    "https://lamarl-playground-git-main-dionaea-tech-project.vercel.app",  # Vercel本番環境
 ]
 
+# Vercelプレビューデプロイメント用の動的オリジンチェック
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in origins if o],  # Noneや空文字列を除外
+    allow_origin_regex=r"https://.*\.vercel\.app",  # すべてのVercelデプロイメントを許可
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
